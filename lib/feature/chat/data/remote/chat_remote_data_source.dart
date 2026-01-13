@@ -12,6 +12,7 @@ abstract class ChatRemoteDataSource {
   void registerMessageHandler(int otherUserId, void Function(Message) handler);
   void unregisterMessageHandler(int otherUserId);
   void registerUnreadChanged(void Function(int senderId, int count) handler);
+  void registerAnyMessageHandler(void Function(Message msg) handler);
   Future<List<Conversation>> getMyConversations({required int eventId, required int myUserId});
 
 
@@ -51,6 +52,10 @@ class ChatRemoteDataSourceImpl implements ChatRemoteDataSource {
 
   @override
   Future<void> disconnect() => service.disconnect();
+
+    @override
+  void registerAnyMessageHandler(void Function(Message msg) handler) =>
+      service.registerAnyMessageHandler(handler);
   
 
   @override

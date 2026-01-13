@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:nativewrappers/_internal/vm/lib/ffi_allocation_patch.dart';
 import 'package:signalr_netcore/hub_connection.dart';
 import 'package:signalr_netcore/hub_connection_builder.dart';
+
 import '../../feature/chat/data/model/conversation_model.dart';
 import '../../feature/chat/data/model/message_model.dart';
 import '../network/api_client.dart';
@@ -15,49 +15,72 @@ class SignalREvents {
 }
 
 class ChatService {
-  final String baseUrl; // http://localhost:8080
+  final String baseUrl;
   late final ApiClient api;
 
   HubConnection? _hub;
   bool _connected = false;
 
+  int? _myUserId;
+  int? _eventId;
+
+  // key = otherUserId (conversation)
   final Map<int, void Function(Message)> _messageHandlers = {};
+
   void Function(int senderId, int count)? _onUnreadChanged;
+
+  // Optional: callback for notifications
+  void Function(Message msg)? _onAnyMessage;
 
   ChatService(this.baseUrl) {
     api = ApiClient(baseUrl);
   }
 
+  int _toInt(dynamic v, {int fallback = 0}) {
+    if (v == null) return fallback;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString()) ?? fallback;
+  }
+
+  String _toStr(dynamic v) => (v ?? '').toString();
+
   Future<void> connect({required int eventId, required int userId}) async {
-    if (_connected && _hub?.state == HubConnectionState.Connected) return;
+    // لو already connected لنفس اليوزر/الإيفنت خلاص
+    if (_connected && _hub?.state == HubConnectionState.Connected) {
+      _eventId = eventId;
+      _myUserId = userId;
+      return;
+    }
+
+    _eventId = eventId;
+    _myUserId = userId;
 
     _hub = HubConnectionBuilder()
         .withUrl('$baseUrl/Chat')
         .withAutomaticReconnect()
         .build();
 
+    // IMPORTANT: بعد reconnect لازم نعمل RegisterUser تاني
+    _hub!.onreconnected(({connectionId}) async {
+      if (_eventId != null && _myUserId != null) {
+        await _hub!.invoke(
+          SignalREvents.registerUser,
+          args: [_eventId!, _myUserId!], // 👈 هنا الحل
+        );
+      }
+    });
+
     _hub!.on(SignalREvents.receiveMessage, (arguments) {
-      if (!(arguments?.isNotEmpty == true)) return;
+      if (arguments == null || arguments.isEmpty) return;
 
-      int _toInt(dynamic v, {int fallback = 0}) {
-  if (v == null) return fallback;
-  if (v is int) return v;
-  if (v is num) return v.toInt();
-  return int.tryParse(v.toString()) ?? fallback;
-}
+      final args = arguments;
 
-String _toStr(dynamic v) => (v ?? '').toString();
-
-final args = arguments!;
-final int eventId = _toInt(args[0]);
-final int senderId = _toInt(args[1]);
-final int receiverId = _toInt(args[2]);
-final String messageText = _toStr(args[3]);
-final int messageId = _toInt(args[4]);
-
-
-
-
+      final int eventId = _toInt(args![0]);
+      final int senderId = _toInt(args[1]);
+      final int receiverId = _toInt(args[2]);
+      final String messageText = _toStr(args[3]);
+      final int messageId = _toInt(args[4]);
 
       final msg = Message(
         id: messageId,
@@ -69,20 +92,32 @@ final int messageId = _toInt(args[4]);
         isRead: false,
       );
 
-      _messageHandlers[senderId]?.call(msg);
+      // 1) callback عام (تستخدمه للـ Notification)
+      _onAnyMessage?.call(msg);
+
+      // 2) توجيه الرسالة للمحادثة الصح
+      // conversationUserId = الطرف الآخر في المحادثة بالنسبة ليا
+      final myId = _myUserId;
+      if (myId != null) {
+        final otherUserId = (senderId == myId) ? receiverId : senderId;
+        _messageHandlers[otherUserId]?.call(msg);
+      } else {
+        // fallback قديم (لو myUserId مش معروف لأي سبب)
+        _messageHandlers[senderId]?.call(msg);
+      }
     });
 
     _hub!.on(SignalREvents.unReadMessageCount, (arguments) {
       if (arguments == null || arguments.length < 4) return;
-      final int senderId = arguments[1] as int;
-      final int count = arguments[3] as int;
+      final senderId = _toInt(arguments![1]);
+      final count = _toInt(arguments[3]);
       _onUnreadChanged?.call(senderId, count);
     });
 
     await _hub!.start();
     _connected = true;
 
-    // IMPORTANT: our backend expects RegisterUser(eventId, userId)
+    // backend expects RegisterUser(eventId, userId)
     await _hub!.invoke(SignalREvents.registerUser, args: [eventId, userId]);
   }
 
@@ -91,7 +126,10 @@ final int messageId = _toInt(args[4]);
     required int receiverId,
     required String messageText,
   }) async {
-    await _hub!.invoke(SignalREvents.sendMessage, args: [eventId, receiverId, messageText]);
+    await _hub!.invoke(
+      SignalREvents.sendMessage,
+      args: [eventId, receiverId, messageText],
+    );
   }
 
   Future<List<Message>> getChatMessages({
@@ -99,7 +137,9 @@ final int messageId = _toInt(args[4]);
     required int myUserId,
     required int otherSideId,
   }) async {
-    final data = await api.getJson('/Chat/getChatMessages?eventId=$eventId&myUserId=$myUserId&otherSideId=$otherSideId');
+    final data = await api.getJson(
+      '/Chat/getChatMessages?eventId=$eventId&myUserId=$myUserId&otherSideId=$otherSideId',
+    );
     final items = (data['items'] as List).cast<Map<String, dynamic>>();
     return items.map((e) => Message.fromJson(e)).toList();
   }
@@ -108,31 +148,37 @@ final int messageId = _toInt(args[4]);
     required int eventId,
     required int myUserId,
   }) async {
-    final data = await api.getJson('/Chat/GetUnReadMessagesCountForEvent?eventId=$eventId&myUserId=$myUserId');
+    final data = await api.getJson(
+      '/Chat/GetUnReadMessagesCountForEvent?eventId=$eventId&myUserId=$myUserId',
+    );
     final items = (data['items'] as List).cast<Map<String, dynamic>>();
     final map = <int, int>{};
     for (final it in items) {
-      map[it['UserId'] as int] = it['Count'] as int;
+      map[_toInt(it['UserId'])] = _toInt(it['Count']);
     }
     return map;
   }
 
-
   Future<List<Conversation>> getMyConversations({
-  required int eventId,
-  required int myUserId,
-}) async {
-  final data = await api.getJson('/Chat/GetMyConversations?eventId=$eventId&myUserId=$myUserId');
-  final items = (data['items'] as List).cast<Map<String, dynamic>>();
-  return items.map((e) => Conversation.fromJson(e)).toList();
-}
-
+    required int eventId,
+    required int myUserId,
+  }) async {
+    final data = await api.getJson(
+      '/Chat/GetMyConversations?eventId=$eventId&myUserId=$myUserId',
+    );
+    final items = (data['items'] as List).cast<Map<String, dynamic>>();
+    return items.map((e) => Conversation.fromJson(e)).toList();
+  }
 
   Future<void> markMessagesAsRead(Set<int> ids) async {
     if (ids.isEmpty) return;
-    await _hub!.invoke(SignalREvents.deleteUnReadMessages, args: [ids.toList()]);
+    await _hub!.invoke(
+      SignalREvents.deleteUnReadMessages,
+      args: [ids.toList()],
+    );
   }
 
+  // handler للمحادثة مع مستخدم معين
   void registerMessageHandler(int otherUserId, void Function(Message) handler) {
     _messageHandlers[otherUserId] = handler;
   }
@@ -142,12 +188,20 @@ final int messageId = _toInt(args[4]);
   }
 
   void registerUnreadChanged(void Function(int senderId, int count) handler) {
-    _onUnreadChanged ??= handler;
+    _onUnreadChanged = handler;
+  }
+
+  // ده اللي هتستخدمه علشان تطلع Notification لأي رسالة
+  void registerAnyMessageHandler(void Function(Message msg) handler) {
+    _onAnyMessage = handler;
   }
 
   Future<void> disconnect() async {
     _messageHandlers.clear();
     _connected = false;
+    _onAnyMessage = null;
+    _onUnreadChanged = null;
+
     if (_hub != null) {
       await _hub!.stop();
       _hub = null;

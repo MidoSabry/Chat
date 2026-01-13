@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/services/local_notification_service.dart';
 import '../../data/model/conversation_model.dart';
 import '../cubit/chat_cubit.dart';
 import 'chat_screen.dart';
@@ -17,13 +20,43 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   final int eventId = 1;
 
   // غيّرها لو عايز (1 أو 2) علشان تبدّل بين المستخدمين
-  final int myUserId = 2;
+  late final int myUserId;
 
   Future<List<Conversation>>? _future;
+
+  // @override
+  // void initState() {
+  //   super.initState();
+  //   _reload();
+  // }
 
   @override
   void initState() {
     super.initState();
+    if (Platform.isAndroid) {
+      myUserId = 1;
+    } else if (Platform.isIOS) {
+      myUserId = 2;
+    } else {
+      myUserId = 1; // fallback
+    }
+
+    final cubit = context.read<ChatCubit>();
+
+    // لازم connect عشان SignalR يشتغل
+    cubit.repo.connect(eventId: eventId, userId: myUserId);
+
+    // Global notification لكل الرسائل
+    cubit.repo.onAnyMessage((msg) {
+      // لو الرسالة مني تجاهل
+      if (msg.senderId == myUserId) return;
+
+      LocalNotificationService.showMessage(
+        id: msg.id, // unique
+        title: 'New message from ${msg.senderId}',
+        body: msg.messageText,
+      );
+    });
     _reload();
   }
 

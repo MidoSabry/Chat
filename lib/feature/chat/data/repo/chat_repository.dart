@@ -12,6 +12,7 @@ abstract class ChatRepository {
   void onMessage(int otherUserId, void Function(Message) handler);
   void offMessage(int otherUserId);
   void onUnreadChanged(void Function(int senderId, int count) handler);
+  void onAnyMessage(void Function(Message msg) handler);
   Future<List<Conversation>> conversations({required int eventId, required int myUserId});
 
 
@@ -48,6 +49,13 @@ class ChatRepositoryImpl implements ChatRepository {
 
   @override
   void onUnreadChanged(void Function(int senderId, int count) handler) => remote.registerUnreadChanged(handler);
+
+  @override
+void onAnyMessage(void Function(Message msg) handler) {
+  remote.registerAnyMessageHandler(handler);
+}
+
+
 
   @override
 Future<List<Conversation>> conversations({required int eventId, required int myUserId}) =>
