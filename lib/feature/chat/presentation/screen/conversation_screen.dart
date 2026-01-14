@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/services/chat_route_tracker.dart';
 import '../../../../core/services/local_notification_service.dart';
 import '../../../../core/services/push_service.dart';
 import '../../data/model/conversation_model.dart';
@@ -47,17 +49,33 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     // لازم connect عشان SignalR يشتغل
     cubit.repo.connect(eventId: eventId, userId: myUserId);
 
-    // Global notification لكل الرسائل
-    cubit.repo.onAnyMessage((msg) {
-      // لو الرسالة مني تجاهل
-      if (msg.senderId == myUserId) return;
+     cubit.repo.onAnyMessage((msg) {
+    // لو الرسالة مني تجاهل
+    if (msg.senderId == myUserId) return;
 
-      LocalNotificationService.showMessage(
-        id: msg.id, // unique
-        title: 'New message from ${msg.senderId}',
-        body: msg.messageText,
-      );
-    });
+    // ✅ لو الشات مفتوح متطلعش notification
+    if (ChatRouteTracker.shouldSuppressNotification(
+      eventId: msg.eventId,
+      senderId: msg.senderId,
+      receiverId: msg.receiverId,
+    )) {
+      debugPrint('🚫 [SignalR] Suppressing notification - chat is open');
+      return;
+    }
+
+    debugPrint('🔔 [SignalR] Showing notification from ${msg.senderId}');
+    
+    LocalNotificationService.showMessage(
+      id: msg.id,
+      title: 'New message from ${msg.senderId}',
+      body: msg.messageText,
+      payload: jsonEncode({
+        'eventId': msg.eventId,
+        'senderId': msg.senderId,
+        'receiverId': msg.receiverId,
+      }),
+    );
+  });
     _initPushToken();
     _reload();
   }

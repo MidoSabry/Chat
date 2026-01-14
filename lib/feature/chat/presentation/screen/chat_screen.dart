@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/chat_route_tracker.dart';
 import '../cubit/chat_cubit.dart';
 import '../cubit/chat_state.dart';
 import '../widgets/message_bubble.dart';
@@ -31,6 +32,14 @@ void initState() {
   super.initState();
   _chatCubit = context.read<ChatCubit>();
 
+    // ✅ قلنا إن الشات ده مفتوح
+  ChatRouteTracker.setOpenChat(
+  eventId: widget.eventId,
+  myUserId: widget.myUserId,
+  otherUserId: widget.otherUserId,
+);
+
+
   _chatCubit.openChat(
     eventId: widget.eventId,
     myUserId: widget.myUserId,
@@ -41,6 +50,7 @@ void initState() {
 
   @override
 void dispose() {
+  ChatRouteTracker.clear();
   _chatCubit.closeChat(widget.otherUserId);
 
   _controller.dispose();

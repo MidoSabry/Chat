@@ -101,10 +101,11 @@ class ChatService {
       if (myId != null) {
         final otherUserId = (senderId == myId) ? receiverId : senderId;
         _messageHandlers[otherUserId]?.call(msg);
-      } else {
-        // fallback قديم (لو myUserId مش معروف لأي سبب)
-        _messageHandlers[senderId]?.call(msg);
       }
+      //  else {
+      //   // fallback قديم (لو myUserId مش معروف لأي سبب)
+      //   _messageHandlers[senderId]?.call(msg);
+      // }
     });
 
     _hub!.on(SignalREvents.unReadMessageCount, (arguments) {

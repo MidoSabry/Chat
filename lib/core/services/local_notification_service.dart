@@ -12,6 +12,8 @@ void notificationTapBackground(NotificationResponse details) {
 class LocalNotificationService {
   static final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
+  
+  static void Function(String? payload)? onTap;
 
   static Future<void> init() async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -24,15 +26,11 @@ class LocalNotificationService {
 
     const settings = InitializationSettings(android: android, iOS: ios);
 
-    await _plugin.initialize(
+     await _plugin.initialize(
       settings,
-      // لما الإشعار يتضغط والتطبيق فاتح/في الخلفية
-      onDidReceiveNotificationResponse: (details) {
-        // ignore: avoid_print
-        print('Notification tapped: ${details.payload}');
+      onDidReceiveNotificationResponse: (NotificationResponse r) {
+        onTap?.call(r.payload);
       },
-      // لما الإشعار يتضغط والتطبيق مقفول/terminated (Android غالبًا)
-      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
     // Android 13+

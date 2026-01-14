@@ -2,18 +2,19 @@ import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-final FlutterLocalNotificationsPlugin _local =
-    FlutterLocalNotificationsPlugin();
+final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // هنا بيشتغل حتى لو التطبيق مقفول (background/terminated)
   // لا تستخدم BuildContext هنا
+  // ممكن تعمل logging بسيط لو حابب:
+  // print('BG message: ${message.messageId}');
 }
 
 class PushService {
   static Future<void> init() async {
-    // Local notifications init
+    // ✅ Init local notifications plugin (مفيد للتعامل مع التراخيص/القنوات)
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosInit = DarwinInitializationSettings(
       requestAlertPermission: true,
@@ -26,54 +27,28 @@ class PushService {
     );
     await _local.initialize(initSettings);
 
-    // Permissions
+    // ✅ Permissions
     await FirebaseMessaging.instance.requestPermission(
       alert: true,
       badge: true,
       sound: true,
     );
 
-    // iOS: لازم تستقبل APNs
+    // ✅ iOS: امنع system notification في foreground
+    // (خلي التحكم كله بإيد PushRouter + LocalNotificationService)
     if (Platform.isIOS) {
       await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-        alert: true,
-        badge: true,
-        sound: true,
+        alert: false,
+        badge: false,
+        sound: false,
       );
     }
 
-    // Background handler
+    // ✅ Background handler
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // Foreground message -> show local notification
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      final title = message.notification?.title ?? 'New message';
-      final body = message.notification?.body ?? '';
-
-      const androidDetails = AndroidNotificationDetails(
-        'chat_messages',
-        'Chat Messages',
-        channelDescription: 'Incoming chat messages',
-        importance: Importance.max,
-        priority: Priority.high,
-      );
-
-      const iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-      );
-
-      const details = NotificationDetails(android: androidDetails, iOS: iosDetails);
-
-      await _local.show(
-        DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        title,
-        body,
-        details,
-        payload: message.data.isEmpty ? null : message.data.toString(),
-      );
-    });
+    // ❌ مهم: شيلنا FirebaseMessaging.onMessage.listen من هنا
+    // علشان مايبقاش عندك اتنين listeners يطلعوا Notifications
   }
 
   static Future<String?> getToken() async {
