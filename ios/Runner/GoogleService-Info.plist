@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.example.chat</string>
+	<string>com.sabry.chat</string>
 	<key>PROJECT_ID</key>
 	<string>chatapp-e9665</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,7 +25,7 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:42566446159:ios:f2607fb7ca2c6ab0f24e3a</string>
+	<string>1:42566446159:ios:62bb1557c4c071c3f24e3a</string>
 	<key>DATABASE_URL</key>
 	<string>https://chatapp-e9665.firebaseio.com</string>
 </dict>

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/services/local_notification_service.dart';
+import '../../../../core/services/push_service.dart';
 import '../../data/model/conversation_model.dart';
 import '../cubit/chat_cubit.dart';
 import 'chat_screen.dart';
@@ -57,8 +58,17 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         body: msg.messageText,
       );
     });
+    _initPushToken();
     _reload();
   }
+
+  Future<void> _initPushToken() async {
+  final token = await PushService.getToken();
+  if (token == null) return;
+
+  final cubit = context.read<ChatCubit>();
+  await cubit.repo.registerPushToken(userId: myUserId, token: token);
+}
 
   void _reload() {
     final cubit = context.read<ChatCubit>();

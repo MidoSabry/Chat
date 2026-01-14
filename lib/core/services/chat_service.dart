@@ -207,4 +207,16 @@ class ChatService {
       _hub = null;
     }
   }
+
+
+  Future<void> registerPushToken({
+  required int userId,
+  required String token,
+}) async {
+  await api.postJson('/Push/RegisterToken', {
+    'UserId': userId,
+    'Token': token,
+  });
+}
+
 }

@@ -13,6 +13,8 @@ abstract class ChatRepository {
   void offMessage(int otherUserId);
   void onUnreadChanged(void Function(int senderId, int count) handler);
   void onAnyMessage(void Function(Message msg) handler);
+  Future<void> registerPushToken({required int userId, required String token});
+
   Future<List<Conversation>> conversations({required int eventId, required int myUserId});
 
 
@@ -55,6 +57,10 @@ void onAnyMessage(void Function(Message msg) handler) {
   remote.registerAnyMessageHandler(handler);
 }
 
+
+@override
+Future<void> registerPushToken({required int userId, required String token}) =>
+    remote.registerPushToken(userId: userId, token: token);
 
 
   @override

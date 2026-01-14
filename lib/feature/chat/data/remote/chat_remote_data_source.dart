@@ -13,6 +13,7 @@ abstract class ChatRemoteDataSource {
   void unregisterMessageHandler(int otherUserId);
   void registerUnreadChanged(void Function(int senderId, int count) handler);
   void registerAnyMessageHandler(void Function(Message msg) handler);
+  Future<void> registerPushToken({required int userId, required String token});
   Future<List<Conversation>> getMyConversations({required int eventId, required int myUserId});
 
 
@@ -56,6 +57,11 @@ class ChatRemoteDataSourceImpl implements ChatRemoteDataSource {
     @override
   void registerAnyMessageHandler(void Function(Message msg) handler) =>
       service.registerAnyMessageHandler(handler);
+
+  @override
+Future<void> registerPushToken({required int userId, required String token}) =>
+    service.registerPushToken(userId: userId, token: token);
+
   
 
   @override
