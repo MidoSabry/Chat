@@ -9,12 +9,12 @@ class ChatCubit extends Cubit<ChatState> {
   ChatCubit(this.repo) : super(ChatState());
 
   final Set<int> _unreadIds = {};
-
-  // لمنع تكرار رسائل السيرفر
   final Set<int> _seenServerIds = {};
 
-  // آخر رسالة optimistic علشان نستبدلها برسالة السيرفر (echo)
   Message? _pendingOptimistic;
+
+  // ✅ لتفادي التداخل أثناء sync
+  bool _syncing = false;
 
   Future<void> openChat({
     required int eventId,
@@ -26,7 +26,7 @@ class ChatCubit extends Cubit<ChatState> {
     try {
       await repo.connect(eventId: eventId, userId: myUserId);
 
-      // ✅ 1) Load first (علشان ما يحصلش duplicate بين load و realtime)
+      // ✅ 1) Load first
       final messages = await repo.loadMessages(
         eventId: eventId,
         myUserId: myUserId,
@@ -45,13 +45,12 @@ class ChatCubit extends Cubit<ChatState> {
 
       emit(state.copyWith(messages: messages, status: ChatStatus.ready));
 
-      // ✅ 2) Then listen realtime
+      // ✅ 2) Listen realtime (للمحادثة دي فقط)
       repo.onMessage(otherUserId, (msg) {
-        // ✅ Dedup by server messageId
         if (_seenServerIds.contains(msg.id)) return;
         _seenServerIds.add(msg.id);
 
-        // ✅ لو دي echo لرسالتي optimistic: استبدلها بدل ما تضيفها
+        // ✅ لو دي echo لرسالتي optimistic: استبدلها
         if (_pendingOptimistic != null &&
             msg.senderId == myUserId &&
             msg.receiverId == otherUserId &&
@@ -59,6 +58,7 @@ class ChatCubit extends Cubit<ChatState> {
           final list = [...state.messages];
           list.removeWhere((x) => x.id == _pendingOptimistic!.id);
           list.add(msg);
+
           _pendingOptimistic = null;
           emit(state.copyWith(messages: list, status: ChatStatus.ready));
           return;
@@ -72,8 +72,63 @@ class ChatCubit extends Cubit<ChatState> {
 
         emit(state.copyWith(messages: updated, status: ChatStatus.ready));
       });
+
+      // ✅ 3) Sync after reconnect (لو النت قطع ورجع)
+      repo.onReconnected(() async {
+        await _syncMissedMessages(
+          eventId: eventId,
+          myUserId: myUserId,
+          otherUserId: otherUserId,
+        );
+      });
     } catch (e) {
       emit(state.copyWith(status: ChatStatus.error, error: e.toString()));
+    }
+  }
+
+  Future<void> _syncMissedMessages({
+    required int eventId,
+    required int myUserId,
+    required int otherUserId,
+  }) async {
+    if (_syncing) return;
+    _syncing = true;
+
+    try {
+      // ✅ اعرف آخر id “حقيقي” من السيرفر (تجاهل optimistic السالب)
+      int lastServerId = 0;
+      for (final m in state.messages) {
+        if (m.id > lastServerId) lastServerId = m.id;
+      }
+
+      final newer = await repo.getMessagesSince(
+        eventId: eventId,
+        myUserId: myUserId,
+        otherUserId: otherUserId,
+        afterId: lastServerId,
+      );
+
+      if (newer.isEmpty) return;
+
+      final list = [...state.messages];
+
+      for (final m in newer) {
+        if (_seenServerIds.contains(m.id)) continue;
+        _seenServerIds.add(m.id);
+
+        // لو رسالة جديدة تخصني كـ receiver
+        if (m.receiverId == myUserId && !m.isRead) {
+          _unreadIds.add(m.id);
+        }
+
+        list.add(m);
+      }
+
+      emit(state.copyWith(messages: list, status: ChatStatus.ready));
+    } catch (_) {
+      // ignore sync errors (هنحاول تاني على reconnect آخر)
+    } finally {
+      _syncing = false;
     }
   }
 
@@ -85,7 +140,7 @@ class ChatCubit extends Cubit<ChatState> {
   }) async {
     if (text.trim().isEmpty) return;
 
-    // ✅ optimistic id سالب عشان ما يتلخبطش مع ids السيرفر
+    // ✅ optimistic id سالب
     final temp = Message(
       id: -DateTime.now().millisecondsSinceEpoch,
       eventId: eventId,
@@ -111,5 +166,6 @@ class ChatCubit extends Cubit<ChatState> {
   Future<void> closeChat(int otherUserId) async {
     repo.offMessage(otherUserId);
     _pendingOptimistic = null;
+    _syncing = false;
   }
 }

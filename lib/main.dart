@@ -19,12 +19,10 @@ Future<void> main() async {
   await Firebase.initializeApp();
   await LocalNotificationService.init();
 
- 
-
   const port = 8080;
   final baseUrl = Platform.isAndroid
       ? 'http://10.0.2.2:$port'
-      : 'http://localhost:$port';
+      : 'http://10.30.20.74:$port';
 
   final service = ChatService(baseUrl);
   final remote = ChatRemoteDataSourceImpl(service);

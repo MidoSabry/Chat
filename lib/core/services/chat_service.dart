@@ -32,8 +32,16 @@ class ChatService {
   // Optional: callback for notifications
   void Function(Message msg)? _onAnyMessage;
 
+  // ✅ callback after reconnect
+  void Function()? _onReconnected;
+
   ChatService(this.baseUrl) {
     api = ApiClient(baseUrl);
+  }
+
+  // ✅ expose setter (Repo/RemoteDataSource هينده عليه)
+  void setOnReconnected(void Function() cb) {
+    _onReconnected = cb;
   }
 
   int _toInt(dynamic v, {int fallback = 0}) {
@@ -61,14 +69,21 @@ class ChatService {
         .withAutomaticReconnect()
         .build();
 
-    // IMPORTANT: بعد reconnect لازم نعمل RegisterUser تاني
+    // IMPORTANT: بعد reconnect لازم نعمل RegisterUser تاني + نعمل sync
     _hub!.onreconnected(({connectionId}) async {
-      if (_eventId != null && _myUserId != null) {
-        await _hub!.invoke(
-          SignalREvents.registerUser,
-          args: [_eventId!, _myUserId!], // 👈 هنا الحل
-        );
+      try {
+        if (_eventId != null && _myUserId != null) {
+          await _hub!.invoke(
+            SignalREvents.registerUser,
+            args: [_eventId!, _myUserId!],
+          );
+        }
+      } catch (_) {
+        // ignore register errors on reconnect (هنحاول تاني تلقائيًا)
       }
+
+      // ✅ notify upper layers (ChatCubit) to sync missed messages
+      _onReconnected?.call();
     });
 
     _hub!.on(SignalREvents.receiveMessage, (arguments) {
@@ -96,16 +111,11 @@ class ChatService {
       _onAnyMessage?.call(msg);
 
       // 2) توجيه الرسالة للمحادثة الصح
-      // conversationUserId = الطرف الآخر في المحادثة بالنسبة ليا
       final myId = _myUserId;
       if (myId != null) {
         final otherUserId = (senderId == myId) ? receiverId : senderId;
         _messageHandlers[otherUserId]?.call(msg);
       }
-      //  else {
-      //   // fallback قديم (لو myUserId مش معروف لأي سبب)
-      //   _messageHandlers[senderId]?.call(msg);
-      // }
     });
 
     _hub!.on(SignalREvents.unReadMessageCount, (arguments) {
@@ -140,6 +150,19 @@ class ChatService {
   }) async {
     final data = await api.getJson(
       '/Chat/getChatMessages?eventId=$eventId&myUserId=$myUserId&otherSideId=$otherSideId',
+    );
+    final items = (data['items'] as List).cast<Map<String, dynamic>>();
+    return items.map((e) => Message.fromJson(e)).toList();
+  }
+
+  Future<List<Message>> getMessagesSince({
+    required int eventId,
+    required int myUserId,
+    required int otherSideId,
+    required int afterId,
+  }) async {
+    final data = await api.getJson(
+      '/Chat/GetMessagesSince?eventId=$eventId&myUserId=$myUserId&otherSideId=$otherSideId&afterId=$afterId',
     );
     final items = (data['items'] as List).cast<Map<String, dynamic>>();
     return items.map((e) => Message.fromJson(e)).toList();
@@ -192,9 +215,18 @@ class ChatService {
     _onUnreadChanged = handler;
   }
 
-  // ده اللي هتستخدمه علشان تطلع Notification لأي رسالة
   void registerAnyMessageHandler(void Function(Message msg) handler) {
     _onAnyMessage = handler;
+  }
+
+  Future<void> registerPushToken({
+    required int userId,
+    required String token,
+  }) async {
+    await api.postJson('/Push/RegisterToken', {
+      'UserId': userId,
+      'Token': token,
+    });
   }
 
   Future<void> disconnect() async {
@@ -202,22 +234,11 @@ class ChatService {
     _connected = false;
     _onAnyMessage = null;
     _onUnreadChanged = null;
+    _onReconnected = null;
 
     if (_hub != null) {
       await _hub!.stop();
       _hub = null;
     }
   }
-
-
-  Future<void> registerPushToken({
-  required int userId,
-  required String token,
-}) async {
-  await api.postJson('/Push/RegisterToken', {
-    'UserId': userId,
-    'Token': token,
-  });
-}
-
 }

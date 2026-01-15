@@ -5,6 +5,8 @@ import '../model/message_model.dart';
 abstract class ChatRemoteDataSource {
   Future<void> connect({required int eventId, required int userId});
   Future<List<Message>> getChatMessages({required int eventId, required int myUserId, required int otherSideId});
+  /// ✅ NEW: fetch messages after last server id (for sync after reconnect)
+  Future<List<Message>> getMessagesSince({required int eventId,required int myUserId,required int otherSideId,required int afterId});
   Future<void> sendMessage({required int eventId, required int receiverId, required String messageText});
   Future<Map<int, int>> getUnreadCounts({required int eventId, required int myUserId});
   Future<void> markMessagesAsRead(Set<int> ids);
@@ -13,6 +15,8 @@ abstract class ChatRemoteDataSource {
   void unregisterMessageHandler(int otherUserId);
   void registerUnreadChanged(void Function(int senderId, int count) handler);
   void registerAnyMessageHandler(void Function(Message msg) handler);
+  /// ✅ callback يتنادي بعد SignalR reconnect
+  void registerOnReconnected(void Function() handler);
   Future<void> registerPushToken({required int userId, required String token});
   Future<List<Conversation>> getMyConversations({required int eventId, required int myUserId});
 
@@ -30,6 +34,20 @@ class ChatRemoteDataSourceImpl implements ChatRemoteDataSource {
   @override
   Future<List<Message>> getChatMessages({required int eventId, required int myUserId, required int otherSideId}) =>
       service.getChatMessages(eventId: eventId, myUserId: myUserId, otherSideId: otherSideId);
+
+  @override
+  Future<List<Message>> getMessagesSince({
+    required int eventId,
+    required int myUserId,
+    required int otherSideId,
+    required int afterId,
+  }) =>
+      service.getMessagesSince(
+        eventId: eventId,
+        myUserId: myUserId,
+        otherSideId: otherSideId,
+        afterId: afterId,
+      );
 
   @override
   Future<void> sendMessage({required int eventId, required int receiverId, required String messageText}) =>
@@ -57,6 +75,11 @@ class ChatRemoteDataSourceImpl implements ChatRemoteDataSource {
     @override
   void registerAnyMessageHandler(void Function(Message msg) handler) =>
       service.registerAnyMessageHandler(handler);
+
+   @override
+  void registerOnReconnected(void Function() handler) =>
+      service.setOnReconnected(handler);
+
 
   @override
 Future<void> registerPushToken({required int userId, required String token}) =>

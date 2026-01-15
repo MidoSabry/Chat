@@ -5,6 +5,9 @@ import '../remote/chat_remote_data_source.dart';
 abstract class ChatRepository {
   Future<void> connect({required int eventId, required int userId});
   Future<List<Message>> loadMessages({required int eventId, required int myUserId, required int otherUserId});
+  /// ✅ NEW: fetch messages after last server id (for sync after reconnect)
+  Future<List<Message>> getMessagesSince({ required int eventId,required int myUserId,required int otherUserId,required int afterId});
+
   Future<void> send({required int eventId, required int receiverId, required String messageText});
   Future<Map<int, int>> unreadCounts({required int eventId, required int myUserId});
   Future<void> markRead(Set<int> ids);
@@ -13,6 +16,8 @@ abstract class ChatRepository {
   void offMessage(int otherUserId);
   void onUnreadChanged(void Function(int senderId, int count) handler);
   void onAnyMessage(void Function(Message msg) handler);
+   /// ✅ callback يتنادي بعد SignalR reconnect
+  void onReconnected(void Function() handler);
   Future<void> registerPushToken({required int userId, required String token});
 
   Future<List<Conversation>> conversations({required int eventId, required int myUserId});
@@ -31,6 +36,20 @@ class ChatRepositoryImpl implements ChatRepository {
   @override
   Future<List<Message>> loadMessages({required int eventId, required int myUserId, required int otherUserId}) =>
       remote.getChatMessages(eventId: eventId, myUserId: myUserId, otherSideId: otherUserId);
+
+   @override
+  Future<List<Message>> getMessagesSince({
+    required int eventId,
+    required int myUserId,
+    required int otherUserId,
+    required int afterId,
+  }) =>
+      remote.getMessagesSince(
+        eventId: eventId,
+        myUserId: myUserId,
+        otherSideId: otherUserId,
+        afterId: afterId,
+      );
 
   @override
   Future<void> send({required int eventId, required int receiverId, required String messageText}) =>
@@ -56,6 +75,11 @@ class ChatRepositoryImpl implements ChatRepository {
 void onAnyMessage(void Function(Message msg) handler) {
   remote.registerAnyMessageHandler(handler);
 }
+
+
+@override
+  void onReconnected(void Function() handler) =>
+      remote.registerOnReconnected(handler);
 
 
 @override

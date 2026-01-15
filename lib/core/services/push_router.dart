@@ -13,6 +13,7 @@ class PushRouter {
   PushRouter(this.navKey);
 
   Future<void> init() async {
+    // Permissions (خصوصًا iOS)
     await FirebaseMessaging.instance.requestPermission(
       alert: true,
       badge: true,
@@ -21,65 +22,52 @@ class PushRouter {
 
     int toInt(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
 
-    // ✅ Foreground messages (Listener الوحيد)
+    // ✅ Foreground FCM: NO local notifications هنا
+    // لأننا هنخلي SignalR هو المسؤول عن إشعارات الـ foreground
     FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
       final eventId = toInt(msg.data['eventId']);
       final senderId = toInt(msg.data['senderId']);
       final receiverId = toInt(msg.data['receiverId']);
 
       debugPrint(
-        'FCM onMessage data: event=$eventId sender=$senderId receiver=$receiverId '
-        'openEvent=${ChatRouteTracker.openEventId} openMe=${ChatRouteTracker.openMyUserId} openOther=${ChatRouteTracker.openOtherUserId}',
+        '📩 [FCM foreground] data: event=$eventId sender=$senderId receiver=$receiverId '
+        'openEvent=${ChatRouteTracker.openEventId} openMe=${ChatRouteTracker.openMyUserId} openOther=${ChatRouteTracker.openOtherUserId} '
+        'notificationTitle=${msg.notification?.title}',
       );
 
-      // ✅ لو نفس الشات المفتوح -> متطلعش Notification
-      if (ChatRouteTracker.shouldSuppressNotification(
-        eventId: eventId,
-        senderId: senderId,
-        receiverId: receiverId,
-      )) {
-        debugPrint('🚫 [FCM] Suppressing notification - chat is open');
-        return;
-      }
-
-      // ✅ Optional: لو payload ناقص (data فاضية) متطلعش local notification
-      // (تقدر تشيلها لو مش محتاج)
-      if (eventId == 0 || senderId == 0 || receiverId == 0) {
-        debugPrint('⚠️ [FCM] Missing data keys, skipping local notification: ${msg.data}');
-        return;
-      }
-
-      await LocalNotificationService.showMessage(
-        id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        title: msg.notification?.title ?? 'New message',
-        body: msg.notification?.body ?? '',
-        payload: jsonEncode(msg.data),
-      );
+      // ✅ لا تعمل showMessage هنا (منع duplicates)
+      // لو عايز فقط تمنع “system banner” على iOS في foreground،
+      // اعمل setForegroundNotificationPresentationOptions في PushService (انت عاملها)
+      return;
     });
 
     // ✅ Background tap (app في الخلفية)
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) {
-      debugPrint('📱 onMessageOpenedApp data: ${msg.data}');
+      debugPrint('📱 [FCM onMessageOpenedApp] data: ${msg.data}');
       _scheduleOpenFromData(msg.data);
     });
 
     // ✅ Terminated tap (app مقفول)
     final initial = await FirebaseMessaging.instance.getInitialMessage();
     if (initial != null) {
-      debugPrint('🚀 getInitialMessage: ${initial.data}');
+      debugPrint('🚀 [FCM getInitialMessage] data: ${initial.data}');
       _scheduleOpenFromData(initial.data);
     }
 
-    // ✅ Local notification tap (من LocalNotificationService)
+    // ✅ Local notification tap (الإشعارات اللي انت بتطلعها من SignalR)
     LocalNotificationService.onTap = (payload) {
       if (payload == null || payload.isEmpty) return;
-      debugPrint('🔔 Local notification tapped: $payload');
+      debugPrint('🔔 [LocalNotification tapped] payload: $payload');
 
-      final decoded = jsonDecode(payload);
-      if (decoded is! Map) return;
+      try {
+        final decoded = jsonDecode(payload);
+        if (decoded is! Map) return;
 
-      final map = decoded.cast<String, dynamic>();
-      _scheduleOpenFromData(map);
+        final map = decoded.cast<String, dynamic>();
+        _scheduleOpenFromData(map);
+      } catch (e) {
+        debugPrint('⚠️ Failed to decode payload: $e');
+      }
     };
   }
 
@@ -102,7 +90,6 @@ class PushRouter {
     if (data == null) return;
 
     int toInt(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
-    
 
     final eventId = toInt(data['eventId']);
     final senderId = toInt(data['senderId']);
@@ -121,6 +108,9 @@ class PushRouter {
 
     _didNavigate = true;
 
+    // ✅ Important:
+    // - لو الـ payload جاي من FCM: receiverId = أنا (اللي استقبل)
+    // - senderId = اللي بعت
     debugPrint('✅ Navigating to /chat: event=$eventId me=$receiverId other=$senderId');
 
     nav.pushNamedAndRemoveUntil(
@@ -128,8 +118,8 @@ class PushRouter {
       (route) => false,
       arguments: {
         'eventId': eventId,
-        'myUserId': receiverId,  // الرسالة جتلي -> أنا receiver
-        'otherUserId': senderId, // اللي بعت -> sender
+        'myUserId': receiverId,
+        'otherUserId': senderId,
       },
     );
   }

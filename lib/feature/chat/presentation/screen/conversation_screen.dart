@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -22,71 +23,92 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   // Demo values
   final int eventId = 1;
 
-  // غيّرها لو عايز (1 أو 2) علشان تبدّل بين المستخدمين
   late final int myUserId;
 
   Future<List<Conversation>>? _future;
 
-  // @override
-  // void initState() {
-  //   super.initState();
-  //   _reload();
-  // }
+  // ✅ علشان ما نركبش listeners أكتر من مرة لو حصل rebuild/عودة للشاشة
+  bool _wiredAnyMessage = false;
 
   @override
   void initState() {
     super.initState();
+
+    // Demo: userId حسب المنصة
     if (Platform.isAndroid) {
       myUserId = 1;
     } else if (Platform.isIOS) {
       myUserId = 2;
     } else {
-      myUserId = 1; // fallback
+      myUserId = 1;
     }
 
+    _boot();
+  }
+
+  Future<void> _boot() async {
     final cubit = context.read<ChatCubit>();
 
-    // لازم connect عشان SignalR يشتغل
-    cubit.repo.connect(eventId: eventId, userId: myUserId);
+    // ✅ خليها await (مفيد عشان SignalR يبدأ قبل ما تعتمد عليه)
+    await cubit.repo.connect(eventId: eventId, userId: myUserId);
 
-     cubit.repo.onAnyMessage((msg) {
-    // لو الرسالة مني تجاهل
-    if (msg.senderId == myUserId) return;
+    // ✅ Listener واحد فقط لإشعارات foreground من SignalR
+    if (!_wiredAnyMessage) {
+      _wiredAnyMessage = true;
 
-    // ✅ لو الشات مفتوح متطلعش notification
-    if (ChatRouteTracker.shouldSuppressNotification(
-      eventId: msg.eventId,
-      senderId: msg.senderId,
-      receiverId: msg.receiverId,
-    )) {
-      debugPrint('🚫 [SignalR] Suppressing notification - chat is open');
-      return;
+      cubit.repo.onAnyMessage((msg) {
+        // لو الرسالة مني تجاهل
+        if (msg.senderId == myUserId) return;
+
+        // ✅ لو نفس الشات مفتوح متطلعش Notification
+        if (ChatRouteTracker.shouldSuppressNotification(
+          eventId: msg.eventId,
+          senderId: msg.senderId,
+          receiverId: msg.receiverId,
+        )) {
+          debugPrint('🚫 [SignalR] Suppressing notification - chat is open');
+          return;
+        }
+
+        debugPrint('🔔 [SignalR] Showing notification from ${msg.senderId}');
+
+        LocalNotificationService.showMessage(
+          id: msg.id, // server message id
+          title: 'New message from ${msg.senderId}',
+          body: msg.messageText,
+          payload: jsonEncode({
+            'eventId': msg.eventId,
+            'senderId': msg.senderId,
+            'receiverId': msg.receiverId,
+          }),
+        );
+      });
     }
 
-    debugPrint('🔔 [SignalR] Showing notification from ${msg.senderId}');
-    
-    LocalNotificationService.showMessage(
-      id: msg.id,
-      title: 'New message from ${msg.senderId}',
-      body: msg.messageText,
-      payload: jsonEncode({
-        'eventId': msg.eventId,
-        'senderId': msg.senderId,
-        'receiverId': msg.receiverId,
-      }),
-    );
-  });
-    _initPushToken();
+    // ✅ Register token + token refresh
+    await _initPushToken();
+    _listenTokenRefresh();
+
+    // Load conversations
     _reload();
   }
 
   Future<void> _initPushToken() async {
-  final token = await PushService.getToken();
-  if (token == null) return;
+    final token = await PushService.getToken();
+    if (token == null || token.isEmpty) return;
 
-  final cubit = context.read<ChatCubit>();
-  await cubit.repo.registerPushToken(userId: myUserId, token: token);
-}
+    final cubit = context.read<ChatCubit>();
+    await cubit.repo.registerPushToken(userId: myUserId, token: token);
+  }
+
+  void _listenTokenRefresh() {
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+      if (newToken.isEmpty) return;
+      final cubit = context.read<ChatCubit>();
+      await cubit.repo.registerPushToken(userId: myUserId, token: newToken);
+      debugPrint('✅ FCM token refreshed & registered');
+    });
+  }
 
   void _reload() {
     final cubit = context.read<ChatCubit>();
@@ -123,7 +145,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   }
 
   Future<void> _openChatWith(int otherUserId) async {
-    // افتح الشات، ولما ترجع اعمل reload للقائمة
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -138,7 +159,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       ),
     );
 
-    // Refresh conversations after returning
+    // Refresh after returning
     _reload();
   }
 
@@ -160,7 +181,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         onPressed: () async {
           final otherId = await _askUserId(context);
           if (otherId == null) return;
-          if (otherId == myUserId) return; // ما تفتحش شات مع نفسك
+          if (otherId == myUserId) return;
           await _openChatWith(otherId);
         },
       ),
