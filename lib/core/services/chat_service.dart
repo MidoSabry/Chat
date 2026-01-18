@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:signalr_netcore/hub_connection.dart';
 import 'package:signalr_netcore/hub_connection_builder.dart';
 
@@ -35,6 +36,9 @@ class ChatService {
   // ✅ callback after reconnect
   void Function()? _onReconnected;
 
+  // ✅ تغيير: list بدل single callback
+  final List<void Function()> _reconnectCallbacks = [];
+
   ChatService(this.baseUrl) {
     api = ApiClient(baseUrl);
   }
@@ -58,6 +62,11 @@ class ChatService {
     if (_connected && _hub?.state == HubConnectionState.Connected) {
       _eventId = eventId;
       _myUserId = userId;
+      try {
+        await _hub!.invoke(SignalREvents.registerUser, args: [eventId, userId]);
+      } catch (e) {
+        debugPrint('⚠️ RegisterUser failed: $e');
+      }
       return;
     }
 
@@ -66,8 +75,44 @@ class ChatService {
 
     _hub = HubConnectionBuilder()
         .withUrl('$baseUrl/Chat')
-        .withAutomaticReconnect()
+        .withAutomaticReconnect(retryDelays: [0, 2, 5, 10])
         .build();
+
+    // ✅ تغيير: ننادي على كل الـ callbacks
+    _hub!.onreconnected(({connectionId}) async {
+      try {
+        if (_eventId != null && _myUserId != null) {
+          debugPrint(
+            '📝 Re-registering user: eventId=$_eventId, userId=$_myUserId',
+          );
+          await _hub!.invoke(
+            SignalREvents.registerUser,
+            args: [_eventId!, _myUserId!],
+          );
+          debugPrint('✅ Re-registration successful');
+        }
+      } catch (e) {
+        debugPrint('❌ Re-registration failed: $e');
+      }
+
+      debugPrint(
+        '🔔 Calling ${_reconnectCallbacks.length} reconnect callbacks',
+      );
+      // ✅ ننادي على كل الـ callbacks المسجلة
+      for (final cb in _reconnectCallbacks) {
+        try {
+          cb();
+        } catch (e) {
+          debugPrint('⚠️ Reconnect callback error: $e');
+        }
+      }
+    });
+
+    // ✅ مهم: نتابع حالة الاتصال
+    _hub!.onclose(({error}) {
+      debugPrint('❌ SignalR connection closed. Error: $error');
+      _connected = false;
+    });
 
     // IMPORTANT: بعد reconnect لازم نعمل RegisterUser تاني + نعمل sync
     _hub!.onreconnected(({connectionId}) async {
@@ -91,7 +136,7 @@ class ChatService {
 
       final args = arguments;
 
-      final int eventId = _toInt(args![0]);
+      final int eventId = _toInt(args[0]);
       final int senderId = _toInt(args[1]);
       final int receiverId = _toInt(args[2]);
       final String messageText = _toStr(args[3]);
@@ -120,7 +165,7 @@ class ChatService {
 
     _hub!.on(SignalREvents.unReadMessageCount, (arguments) {
       if (arguments == null || arguments.length < 4) return;
-      final senderId = _toInt(arguments![1]);
+      final senderId = _toInt(arguments[1]);
       final count = _toInt(arguments[3]);
       _onUnreadChanged?.call(senderId, count);
     });
@@ -235,6 +280,7 @@ class ChatService {
     _onAnyMessage = null;
     _onUnreadChanged = null;
     _onReconnected = null;
+    _reconnectCallbacks.clear();
 
     if (_hub != null) {
       await _hub!.stop();

@@ -56,6 +56,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     if (!_wiredAnyMessage) {
       _wiredAnyMessage = true;
 
+      if (Platform.isAndroid) {
       cubit.repo.onAnyMessage((msg) {
         // لو الرسالة مني تجاهل
         if (msg.senderId == myUserId) return;
@@ -84,7 +85,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         );
       });
     }
-
+    }
     // ✅ Register token + token refresh
     await _initPushToken();
     _listenTokenRefresh();

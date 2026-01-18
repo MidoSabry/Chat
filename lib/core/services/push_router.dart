@@ -84,43 +84,91 @@ class PushRouter {
     Future.delayed(const Duration(milliseconds: 1500), _tryNavigate);
   }
 
+  // void _tryNavigate() {
+  //   if (_didNavigate) return;
+  //   final data = _pendingData;
+  //   if (data == null) return;
+
+  //   int toInt(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
+
+  //   final eventId = toInt(data['eventId']);
+  //   final senderId = toInt(data['senderId']);
+  //   final receiverId = toInt(data['receiverId']);
+
+  //   if (eventId == 0 || senderId == 0 || receiverId == 0) {
+  //     debugPrint('⚠️ Invalid navigation data: $data');
+  //     return;
+  //   }
+
+  //   final nav = navKey.currentState;
+  //   if (nav == null) {
+  //     debugPrint('⚠️ Navigator not ready yet...');
+  //     return;
+  //   }
+
+  //   _didNavigate = true;
+
+  //   // ✅ Important:
+  //   // - لو الـ payload جاي من FCM: receiverId = أنا (اللي استقبل)
+  //   // - senderId = اللي بعت
+  //   debugPrint('✅ Navigating to /chat: event=$eventId me=$receiverId other=$senderId');
+
+  //   nav.pushNamedAndRemoveUntil(
+  //     '/chat',
+  //     (route) => false,
+  //     arguments: {
+  //       'eventId': eventId,
+  //       'myUserId': receiverId,
+  //       'otherUserId': senderId,
+  //     },
+  //   );
+  // }
+
+
+
   void _tryNavigate() {
-    if (_didNavigate) return;
-    final data = _pendingData;
-    if (data == null) return;
+  if (_didNavigate) return;
+  final data = _pendingData;
+  if (data == null) return;
 
-    int toInt(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
+  int toInt(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
 
-    final eventId = toInt(data['eventId']);
-    final senderId = toInt(data['senderId']);
-    final receiverId = toInt(data['receiverId']);
+  final eventId = toInt(data['eventId']);
+  final senderId = toInt(data['senderId']);
+  final receiverId = toInt(data['receiverId']);
 
-    if (eventId == 0 || senderId == 0 || receiverId == 0) {
-      debugPrint('⚠️ Invalid navigation data: $data');
-      return;
-    }
+  if (eventId == 0 || senderId == 0 || receiverId == 0) return;
 
-    final nav = navKey.currentState;
-    if (nav == null) {
-      debugPrint('⚠️ Navigator not ready yet...');
-      return;
-    }
+  final nav = navKey.currentState;
+  if (nav == null) return;
 
     _didNavigate = true;
 
-    // ✅ Important:
-    // - لو الـ payload جاي من FCM: receiverId = أنا (اللي استقبل)
-    // - senderId = اللي بعت
-    debugPrint('✅ Navigating to /chat: event=$eventId me=$receiverId other=$senderId');
+  // ✅ ثبت هوية المستخدم الحالي في التطبيق كله
+  CurrentSession.myUserId = receiverId;
+  CurrentSession.eventId = eventId;
 
-    nav.pushNamedAndRemoveUntil(
-      '/chat',
-      (route) => false,
-      arguments: {
-        'eventId': eventId,
-        'myUserId': receiverId,
-        'otherUserId': senderId,
-      },
-    );
-  }
+  // ✅ فعل الـ suppression فورًا
+  ChatRouteTracker.setOpenChat(
+    eventId: eventId,
+    myUserId: receiverId,
+    otherUserId: senderId,
+  );
+
+  nav.pushNamedAndRemoveUntil('/', (r) => false);
+  nav.pushNamed('/chat', arguments: {
+    'eventId': eventId,
+    'myUserId': receiverId,
+    'otherUserId': senderId,
+  });
+
+}
+
+}
+
+
+
+class CurrentSession {
+  static int? myUserId;
+  static int? eventId;
 }

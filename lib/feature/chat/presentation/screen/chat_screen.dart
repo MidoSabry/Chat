@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/services/chat_route_tracker.dart';
+import '../../../../core/services/ios_active_chat_channel.dart';
 import '../cubit/chat_cubit.dart';
 import '../cubit/chat_state.dart';
 import '../widgets/message_bubble.dart';
@@ -27,36 +28,50 @@ class _ChatScreenState extends State<ChatScreen> {
 
   late final ChatCubit _chatCubit;
 
- @override
-void initState() {
-  super.initState();
-  _chatCubit = context.read<ChatCubit>();
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await IOSActiveChat.setActiveChat(
+        eventId: widget.eventId,
+        myUserId: widget.myUserId,
+        otherUserId: widget.otherUserId,
+      );
+    });
+
+    _chatCubit = context.read<ChatCubit>();
 
     // ✅ قلنا إن الشات ده مفتوح
-  ChatRouteTracker.setOpenChat(
-  eventId: widget.eventId,
-  myUserId: widget.myUserId,
-  otherUserId: widget.otherUserId,
-);
+    ChatRouteTracker.setOpenChat(
+      eventId: widget.eventId,
+      myUserId: widget.myUserId,
+      otherUserId: widget.otherUserId,
+    );
 
+    _chatCubit.openChat(
+      eventId: widget.eventId,
+      myUserId: widget.myUserId,
+      otherUserId: widget.otherUserId,
+    );
 
-  _chatCubit.openChat(
-    eventId: widget.eventId,
-    myUserId: widget.myUserId,
-    otherUserId: widget.otherUserId,
-  );
-}
-
+    IOSActiveChat.setActiveChat(
+      eventId: widget.eventId,
+      myUserId: widget.myUserId,
+      otherUserId: widget.otherUserId,
+    );
+  }
 
   @override
-void dispose() {
-  ChatRouteTracker.clear();
-  _chatCubit.closeChat(widget.otherUserId);
+  void dispose() {
+    ChatRouteTracker.clear();
+    _chatCubit.closeChat(widget.otherUserId);
 
-  _controller.dispose();
-  _scroll.dispose();
-  super.dispose();
-}
+    _controller.dispose();
+    _scroll.dispose();
+    IOSActiveChat.clearActiveChat();
+    super.dispose();
+  }
 
   void _scrollToBottom() {
     if (!_scroll.hasClients) return;
@@ -70,11 +85,24 @@ void dispose() {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Chat with ${widget.otherUserId}')),
+      appBar: AppBar(
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios), // شكل iOS
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+              )
+            : null,
+        title: Text('Chat with ${widget.otherUserId}'),
+      ),
+
       body: BlocConsumer<ChatCubit, ChatState>(
         listener: (_, state) {
           if (state.status == ChatStatus.ready) {
-            WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _scrollToBottom(),
+            );
           }
         },
         builder: (context, state) {
@@ -119,17 +147,17 @@ void dispose() {
                           final text = _controller.text;
                           _controller.clear();
                           await context.read<ChatCubit>().send(
-                                eventId: widget.eventId,
-                                myUserId: widget.myUserId,
-                                otherUserId: widget.otherUserId,
-                                text: text,
-                              );
+                            eventId: widget.eventId,
+                            myUserId: widget.myUserId,
+                            otherUserId: widget.otherUserId,
+                            text: text,
+                          );
                         },
-                      )
+                      ),
                     ],
                   ),
                 ),
-              )
+              ),
             ],
           );
         },

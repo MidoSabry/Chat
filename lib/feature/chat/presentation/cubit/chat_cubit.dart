@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../data/model/message_model.dart';
 import '../../data/repo/chat_repository.dart';
@@ -75,6 +76,7 @@ class ChatCubit extends Cubit<ChatState> {
 
       // ✅ 3) Sync after reconnect (لو النت قطع ورجع)
       repo.onReconnected(() async {
+         debugPrint('🔄 Reconnected! Syncing missed messages...');
         await _syncMissedMessages(
           eventId: eventId,
           myUserId: myUserId,
@@ -91,15 +93,21 @@ class ChatCubit extends Cubit<ChatState> {
     required int myUserId,
     required int otherUserId,
   }) async {
-    if (_syncing) return;
+    if (_syncing){
+      debugPrint('⚠️ Already syncing, skipping...');
+      return;
+    } 
     _syncing = true;
 
-    try {
-      // ✅ اعرف آخر id “حقيقي” من السيرفر (تجاهل optimistic السالب)
-      int lastServerId = 0;
-      for (final m in state.messages) {
-        if (m.id > lastServerId) lastServerId = m.id;
+try {
+    int lastServerId = 0;
+    for (final m in state.messages) {
+      if (m.id > 0 && m.id > lastServerId) {
+        lastServerId = m.id;
       }
+    }
+
+      debugPrint('📥 Fetching messages after ID: $lastServerId');
 
       final newer = await repo.getMessagesSince(
         eventId: eventId,
@@ -108,9 +116,15 @@ class ChatCubit extends Cubit<ChatState> {
         afterId: lastServerId,
       );
 
-      if (newer.isEmpty) return;
+      if (newer.isEmpty) {
+      debugPrint('✅ No new messages');
+      return;
+    }
+
+    debugPrint('✅ Found ${newer.length} new messages');
 
       final list = [...state.messages];
+      int addedCount = 0;
 
       for (final m in newer) {
         if (_seenServerIds.contains(m.id)) continue;
@@ -122,10 +136,16 @@ class ChatCubit extends Cubit<ChatState> {
         }
 
         list.add(m);
+        addedCount++;
       }
 
+     if (addedCount > 0) {
+      list.sort((a, b) => a.id.compareTo(b.id));
       emit(state.copyWith(messages: list, status: ChatStatus.ready));
-    } catch (_) {
+      debugPrint('✅ [Sync] Updated UI with $addedCount new messages');
+    }
+    } catch (e) {
+      debugPrint('❌ Sync error:$e');
       // ignore sync errors (هنحاول تاني على reconnect آخر)
     } finally {
       _syncing = false;
