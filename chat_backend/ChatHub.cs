@@ -2,6 +2,14 @@ using Microsoft.AspNetCore.SignalR;
 
 public class ChatHub : Hub
 {
+
+    private readonly FcmService _fcm;
+
+    public ChatHub(FcmService fcm)
+    {
+        _fcm = fcm;
+    }
+
     // Client calls: RegisterUser(eventId, userId)
     public async Task RegisterUser(int eventId, int userId)
     {
@@ -10,6 +18,30 @@ public class ChatHub : Hub
 
         Context.Items["eventId"] = eventId;
         Context.Items["userId"] = userId;
+
+        lock (ChatStore.LockObj)
+        {
+            ChatStore.OnlineConnections.TryGetValue(userId, out var c);
+            ChatStore.OnlineConnections[userId] = c + 1;
+        }
+    }
+
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
+        if (Context.Items.TryGetValue("userId", out var v) && v is int userId)
+        {
+            lock (ChatStore.LockObj)
+            {
+                if (ChatStore.OnlineConnections.TryGetValue(userId, out var c))
+                {
+                    c--;
+                    if (c <= 0) ChatStore.OnlineConnections.Remove(userId);
+                    else ChatStore.OnlineConnections[userId] = c;
+                }
+            }
+        }
+
+        return base.OnDisconnectedAsync(exception);
     }
 
     // Client calls: SendMessage(eventId, receiverId, messageText)
@@ -41,6 +73,39 @@ public class ChatHub : Hub
         // Echo to sender
         await Clients.Group($"user:{senderId}")
             .SendAsync("ReceiveMessage", eventId, senderId, receiverId, msg.MessageText, msg.Id);
+
+        // ✅ Push Notification للـ receiver
+string? token = null;
+ bool receiverOnline;
+lock (ChatStore.LockObj)
+{
+    ChatStore.UserTokens.TryGetValue(receiverId, out token);
+    receiverOnline = ChatStore.OnlineConnections.ContainsKey(receiverId);
+}
+
+ if (!receiverOnline && !string.IsNullOrWhiteSpace(token))
+{
+    try
+    {
+        await _fcm.SendToTokenAsync(
+            token!,
+            title: $"New message from {senderId}",
+            body: messageText,
+            data: new Dictionary<string, string>
+            {
+                ["eventId"] = eventId.ToString(),
+                ["senderId"] = senderId.ToString(),
+                ["receiverId"] = receiverId.ToString()
+            }
+        );
+    }
+    catch (Exception ex)
+    {
+        // مهم: فشل الـ push ما يوقفش SendMessage
+        Console.WriteLine("FCM error: " + ex.Message);
+    }
+}
+
 
         // Server event: UnReadMessageCountForUser
         int count;
@@ -85,4 +150,38 @@ public class ChatHub : Hub
         if (Context.Items.TryGetValue("userId", out var v) && v is int id) return id;
         throw new HubException("Not registered. Call RegisterUser(eventId, userId) first.");
     }
+
+
+    public override Task OnDisconnectedAsync(Exception? exception)
+{
+    if (Context.Items.TryGetValue("userId", out var v) && v is int userId)
+    {
+        lock (ChatStore.LockObj)
+        {
+            if (ChatStore.OnlineConnections.TryGetValue(userId, out var c))
+            {
+                c--;
+                if (c <= 0) ChatStore.OnlineConnections.Remove(userId);
+                else ChatStore.OnlineConnections[userId] = c;
+            }
+        }
+    }
+    return base.OnDisconnectedAsync(exception);
+}
+
+public async Task RegisterUser(int eventId, int userId)
+{
+    await Groups.AddToGroupAsync(Context.ConnectionId, $"event:{eventId}");
+    await Groups.AddToGroupAsync(Context.ConnectionId, $"user:{userId}");
+
+    Context.Items["eventId"] = eventId;
+    Context.Items["userId"] = userId;
+
+    lock (ChatStore.LockObj)
+    {
+        ChatStore.OnlineConnections.TryGetValue(userId, out var c);
+        ChatStore.OnlineConnections[userId] = c + 1;
+    }
+}
+
 }
