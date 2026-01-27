@@ -30,6 +30,7 @@ Future<void> main() async {
 
   final pushRouter = PushRouter(navKey);
   await pushRouter.init();
+  
 
   runApp(MyApp(repo: repo));
 }

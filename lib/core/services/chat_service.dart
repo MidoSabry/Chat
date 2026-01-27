@@ -13,6 +13,8 @@ class SignalREvents {
   static const String sendMessage = 'SendMessage';
   static const String registerUser = 'RegisterUser';
   static const String deleteUnReadMessages = 'DeleteUnReadMessages';
+  static const String userTyping = 'UserTyping';
+  static const String typing = 'Typing';
 }
 
 class ChatService {
@@ -39,6 +41,8 @@ class ChatService {
   // ✅ تغيير: list بدل single callback
   final List<void Function()> _reconnectCallbacks = [];
 
+  void Function(int otherUserId, bool isTyping)? _onTyping;
+
   ChatService(this.baseUrl) {
     api = ApiClient(baseUrl);
   }
@@ -58,6 +62,7 @@ class ChatService {
   String _toStr(dynamic v) => (v ?? '').toString();
 
   Future<void> connect({required int eventId, required int userId}) async {
+    debugPrint('SignalR URL => $baseUrl/Chat'); // ✅ هنا بالظبط
     // لو already connected لنفس اليوزر/الإيفنت خلاص
     if (_connected && _hub?.state == HubConnectionState.Connected) {
       _eventId = eventId;
@@ -170,6 +175,16 @@ class ChatService {
       _onUnreadChanged?.call(senderId, count);
     });
 
+    _hub!.on(SignalREvents.userTyping, (arguments) {
+      if (arguments == null || arguments.length < 4) return;
+
+      final int senderId = _toInt(arguments[1]);
+      final bool isTyping = arguments[3] == true || _toInt(arguments[3]) == 1;
+
+      // senderId هنا هو "الطرف الآخر" بالنسبة لي
+      _onTyping?.call(senderId, isTyping);
+    });
+
     await _hub!.start();
     _connected = true;
 
@@ -272,6 +287,25 @@ class ChatService {
       'UserId': userId,
       'Token': token,
     });
+  }
+
+  void registerTypingHandler(void Function(int otherUserId, bool isTyping) cb) {
+    _onTyping = cb;
+  }
+
+  Future<void> sendTyping({
+    required int eventId,
+    required int receiverId,
+    required bool isTyping,
+  }) async {
+    try {
+      await _hub?.invoke(
+        SignalREvents.typing,
+        args: [eventId, receiverId, isTyping],
+      );
+    } catch (e) {
+      debugPrint('❌ Typing invoke failed: $e');
+    }
   }
 
   Future<void> disconnect() async {

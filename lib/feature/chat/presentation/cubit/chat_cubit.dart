@@ -1,3 +1,5 @@
+// chat_cubit.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../data/model/message_model.dart';
@@ -17,6 +19,14 @@ class ChatCubit extends Cubit<ChatState> {
   // ✅ لتفادي التداخل أثناء sync
   bool _syncing = false;
 
+  // ✅ typing state
+  Timer? _typingDebounce;
+  bool _sentTyping = false;
+
+  int? _currentEventId;
+  int? _currentMyUserId;
+  int? _currentOtherUserId;
+
   Future<void> openChat({
     required int eventId,
     required int myUserId,
@@ -25,6 +35,10 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(status: ChatStatus.loading));
 
     try {
+      _currentEventId = eventId;
+      _currentMyUserId = myUserId;
+      _currentOtherUserId = otherUserId;
+
       await repo.connect(eventId: eventId, userId: myUserId);
 
       // ✅ 1) Load first
@@ -44,7 +58,17 @@ class ChatCubit extends Cubit<ChatState> {
         }
       }
 
-      emit(state.copyWith(messages: messages, status: ChatStatus.ready));
+      emit(state.copyWith(
+        messages: messages,
+        status: ChatStatus.ready,
+        otherTyping: false,
+      ));
+
+      // ✅ Typing listener (للمحادثة دي فقط)
+      repo.onTyping((otherId, isTyping) {
+        if (otherId != otherUserId) return;
+        emit(state.copyWith(otherTyping: isTyping));
+      });
 
       // ✅ 2) Listen realtime (للمحادثة دي فقط)
       repo.onMessage(otherUserId, (msg) {
@@ -76,7 +100,7 @@ class ChatCubit extends Cubit<ChatState> {
 
       // ✅ 3) Sync after reconnect (لو النت قطع ورجع)
       repo.onReconnected(() async {
-         debugPrint('🔄 Reconnected! Syncing missed messages...');
+        debugPrint('🔄 Reconnected! Syncing missed messages...');
         await _syncMissedMessages(
           eventId: eventId,
           myUserId: myUserId,
@@ -88,24 +112,53 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  /// ✅ Call from TextField.onChanged
+  void onTextChanged(String text) {
+    final eventId = _currentEventId;
+    final myUserId = _currentMyUserId;
+    final otherUserId = _currentOtherUserId;
+
+    if (eventId == null || myUserId == null || otherUserId == null) return;
+
+    final nowTyping = text.trim().isNotEmpty;
+
+    // ✅ ابعت true مرة واحدة أول ما يبدأ يكتب
+    if (nowTyping && !_sentTyping) {
+      _sentTyping = true;
+      repo.sendTyping(eventId: eventId, receiverId: otherUserId, isTyping: true);
+    }
+
+    // ✅ debounce لإرسال false بعد ما يوقف
+    _typingDebounce?.cancel();
+    _typingDebounce = Timer(const Duration(milliseconds: 900), () {
+      if (!_sentTyping) return;
+      _sentTyping = false;
+      repo.sendTyping(
+        eventId: eventId,
+        receiverId: otherUserId,
+        isTyping: false,
+      );
+    });
+  }
+
   Future<void> _syncMissedMessages({
     required int eventId,
     required int myUserId,
     required int otherUserId,
   }) async {
-    if (_syncing){
+    if (_syncing) {
       debugPrint('⚠️ Already syncing, skipping...');
       return;
-    } 
+    }
     _syncing = true;
 
-try {
-    int lastServerId = 0;
-    for (final m in state.messages) {
-      if (m.id > 0 && m.id > lastServerId) {
-        lastServerId = m.id;
+    try {
+      int lastServerId = 0;
+      for (final m in state.messages) {
+        if (m.id > 0 && m.id > lastServerId) {
+          lastServerId = m.id;
+        }
       }
-    }
 
       debugPrint('📥 Fetching messages after ID: $lastServerId');
 
@@ -117,11 +170,11 @@ try {
       );
 
       if (newer.isEmpty) {
-      debugPrint('✅ No new messages');
-      return;
-    }
+        debugPrint('✅ No new messages');
+        return;
+      }
 
-    debugPrint('✅ Found ${newer.length} new messages');
+      debugPrint('✅ Found ${newer.length} new messages');
 
       final list = [...state.messages];
       int addedCount = 0;
@@ -139,11 +192,11 @@ try {
         addedCount++;
       }
 
-     if (addedCount > 0) {
-      list.sort((a, b) => a.id.compareTo(b.id));
-      emit(state.copyWith(messages: list, status: ChatStatus.ready));
-      debugPrint('✅ [Sync] Updated UI with $addedCount new messages');
-    }
+      if (addedCount > 0) {
+        list.sort((a, b) => a.id.compareTo(b.id));
+        emit(state.copyWith(messages: list, status: ChatStatus.ready));
+        debugPrint('✅ [Sync] Updated UI with $addedCount new messages');
+      }
     } catch (e) {
       debugPrint('❌ Sync error:$e');
       // ignore sync errors (هنحاول تاني على reconnect آخر)
@@ -160,6 +213,17 @@ try {
   }) async {
     if (text.trim().isEmpty) return;
 
+    // ✅ stop typing immediately after send
+    _typingDebounce?.cancel();
+    if (_sentTyping) {
+      _sentTyping = false;
+      repo.sendTyping(
+        eventId: eventId,
+        receiverId: otherUserId,
+        isTyping: false,
+      );
+    }
+
     // ✅ optimistic id سالب
     final temp = Message(
       id: -DateTime.now().millisecondsSinceEpoch,
@@ -174,7 +238,11 @@ try {
     _pendingOptimistic = temp;
     emit(state.copyWith(messages: [...state.messages, temp]));
 
-    await repo.send(eventId: eventId, receiverId: otherUserId, messageText: text);
+    await repo.send(
+      eventId: eventId,
+      receiverId: otherUserId,
+      messageText: text,
+    );
   }
 
   Future<void> markRead() async {
@@ -185,7 +253,18 @@ try {
 
   Future<void> closeChat(int otherUserId) async {
     repo.offMessage(otherUserId);
+
+    // ✅ typing cleanup
+    _typingDebounce?.cancel();
+    _sentTyping = false;
+
     _pendingOptimistic = null;
     _syncing = false;
+
+    _currentEventId = null;
+    _currentMyUserId = null;
+    _currentOtherUserId = null;
+
+    emit(state.copyWith(otherTyping: false));
   }
 }

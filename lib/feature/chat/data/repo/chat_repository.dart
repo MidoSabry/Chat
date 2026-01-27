@@ -22,6 +22,14 @@ abstract class ChatRepository {
 
   Future<List<Conversation>> conversations({required int eventId, required int myUserId});
 
+  Future<void> sendTyping({
+  required int eventId,
+  required int receiverId,
+  required bool isTyping,
+});
+
+void onTyping(void Function(int otherUserId, bool isTyping) handler);
+
 
   Future<void> disconnect();
 }
@@ -90,6 +98,25 @@ Future<void> registerPushToken({required int userId, required String token}) =>
   @override
 Future<List<Conversation>> conversations({required int eventId, required int myUserId}) =>
     remote.getMyConversations(eventId: eventId, myUserId: myUserId);
+
+
+@override
+Future<void> sendTyping({
+  required int eventId,
+  required int receiverId,
+  required bool isTyping,
+}) =>
+    remote.sendTyping(
+      eventId: eventId,
+      receiverId: receiverId,
+      isTyping: isTyping,
+    );
+
+@override
+void onTyping(void Function(int otherUserId, bool isTyping) handler) =>
+    remote.registerTypingHandler(handler);
+
+
 
 
   @override

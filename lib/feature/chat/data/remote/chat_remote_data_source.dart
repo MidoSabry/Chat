@@ -20,6 +20,11 @@ abstract class ChatRemoteDataSource {
   Future<void> registerPushToken({required int userId, required String token});
   Future<List<Conversation>> getMyConversations({required int eventId, required int myUserId});
 
+  //for typing
+  Future<void> sendTyping({required int eventId, required int receiverId, required bool isTyping});
+  void registerTypingHandler(void Function(int otherUserId, bool isTyping) handler);
+
+
 
   Future<void> disconnect();
 }
@@ -90,5 +95,15 @@ Future<void> registerPushToken({required int userId, required String token}) =>
   @override
 Future<List<Conversation>> getMyConversations({required int eventId, required int myUserId}) =>
     service.getMyConversations(eventId: eventId, myUserId: myUserId);
+
+
+    @override
+Future<void> sendTyping({required int eventId, required int receiverId, required bool isTyping}) =>
+  service.sendTyping(eventId: eventId, receiverId: receiverId, isTyping: isTyping);
+
+@override
+void registerTypingHandler(void Function(int otherUserId, bool isTyping) handler) =>
+  service.registerTypingHandler(handler);
+
 
 }

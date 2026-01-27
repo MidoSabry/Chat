@@ -94,7 +94,19 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               )
             : null,
-        title: Text('Chat with ${widget.otherUserId}'),
+        title: Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+    Text('Chat with ${widget.otherUserId}'),
+    BlocBuilder<ChatCubit, ChatState>(
+      buildWhen: (p, n) => p.otherTyping != n.otherTyping,
+      builder: (_, st) => st.otherTyping
+          ? const Text('typing...', style: TextStyle(fontSize: 12))
+          : const SizedBox.shrink(),
+    ),
+  ],
+),
+
       ),
 
       body: BlocConsumer<ChatCubit, ChatState>(
@@ -122,7 +134,17 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemBuilder: (_, i) {
                     final m = state.messages[i];
                     final isMe = m.senderId == widget.myUserId;
-                    return MessageBubble(text: m.messageText, isMe: isMe);
+                   final pending = isMe && m.id < 0;     // optimistic
+final read = isMe && m.id > 0 && m.isRead;
+
+return MessageBubble(
+  text: m.messageText,
+  isMe: isMe,
+  pending: pending,
+  read: read,
+);
+
+
                   },
                 ),
               ),
@@ -134,6 +156,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       Expanded(
                         child: TextField(
                           controller: _controller,
+                          onChanged: (v) => context.read<ChatCubit>().onTextChanged(v),
+
                           decoration: const InputDecoration(
                             hintText: 'Type a message...',
                             border: OutlineInputBorder(),
